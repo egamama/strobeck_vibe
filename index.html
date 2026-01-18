@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Strobeck Vibe Editor</title>
+<style>
+  body { margin:0; background:black; color:white; font-family:sans-serif; overflow:hidden; }
+  canvas { display:block; margin:0 auto; }
+  .controls {
+    position:fixed; top:10px; left:10px; z-index:10; 
+    background:rgba(0,0,0,0.7); padding:10px; border-radius:8px; max-width:300px;
+  }
+  .controls label { display:block; margin:5px 0; }
+  input[type=range], select, button { width:100%; margin:3px 0; }
+</style>
+</head>
+<body>
+
+<div class="controls">
+  <input type="file" id="upload" accept="video/mp4"><br>
+  <label>Preset:
+    <select id="preset">
+      <option value="default">Default</option>
+      <option value="dirty">Dirty VHS</option>
+      <option value="acid">Acid Colors</option>
+      <option value="contrast">High Contrast</option>
+    </select>
+  </label>
+  <label>Hue: <input id="hue" type="range" min="0" max="360" value="0"></label>
+  <label>Saturation: <input id="sat" type="range" min="0" max="100" value="80"></label>
+  <label>Brightness: <input id="bright" type="range" min="0" max="100" value="50"></label>
+  <label>Noise Alpha: <input id="alpha" type="range" min="0" max="255" value="25"></label>
+  <label>Speed: <input id="speed" type="range" min="1" max="10" value="1"></label>
+  <button id="export">Export Video</button>
+</div>
+
+<video id="video" style="display:none"></video>
+<canvas id="canvas"></canvas>
+
+<script>
+const video = document.getElementById("video");
+const canvas = document.getElementById("canvas");
+const ctx = canvas.getContext("2d");
+
+const upload = document.getElementById("upload");
+const presetSelect = document.getElementById("preset");
+const hueSlider = document.getElementById("hue");
+const satSlider = document.getElementById("sat");
+const brightSlider = document.getElementById("bright");
+const alphaSlider = document.getElementById("alpha");
+const speedSlider = document.getElementById("speed");
+const exportBtn = document.getElementById("export");
+
+let preset = "default";
+let hue = parseInt(hueSlider.value);
+let offset = 0;
+
+// Загружаем видео и подстраиваем canvas
+upload.addEventListener("change", e => {
+  const file = e.target.files[0];
+  if(file){
+    video.src = URL.createObjectURL(file);
+    video.load();
+    video.addEventListener("loadedmetadata", () => {
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      video.play();
+      drawFrame();
+    }, { once: true });
+  }
+});
+
+// Обновляем пресет и слайдеры
+presetSelect.addEventListener("change", ()=>{ preset = presetSelect.value; });
+hueSlider.addEventListener("input", ()=>{ hue = parseInt(hueSlider.value); });
+
+// Отрисовка кадра
+function drawFrame(){
+  if(video.paused || video.ended) return;
+
+  // Сначала рисуем сам кадр видео
+  ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+  // Применяем эффекты сверху
+  applyPreset();
+
+  requestAnimationFrame(drawFrame);
+}
+
+// Эффекты и пресеты
+function applyPreset(){
+  const sat = satSlider.value;
+  const bright = brightSlider.value;
+  const alpha = alphaSlider.value;
+  const speed = speedSlider.value;
+
+  // Легкий цветной слой с прозрачностью
+  ctx.globalAlpha = 0.3;
+  ctx.fillStyle = `hsl(${hue}, ${sat}%, ${bright + 10*Math.sin(offset)}%)`;
+  ctx.fillRect(0,0,canvas.width,canvas.height);
+  ctx.globalAlpha = 1;
+
+  const image = ctx.getImageData(0,0,canvas.width,canvas.height);
+  const data = image.data;
+
+  for(let i=0;i<data.length;i+=4){
+    let r = data[i], g = data[i+1], b = data[i+2];
+
+    if(preset==="dirty"){ 
+      let noise = (Math.random()-0.5)*50;
+      data[i] = r + noise;
+      data[i+1] = g + noise/2;
+      data[i+2] = b + noise/2;
+    } else if(preset==="acid"){ 
+      data[i] = 255 - r;
+      data[i+1] = 255 - g;
+      data[i+2] = 255 - b;
+    } else if(preset==="contrast"){ 
+      data[i] = r>128 ? 255 : 0;
+      data[i+1] = g>128 ? 255 : 0;
+      data[i+2] = b>128 ? 255 : 0;
+    }
+  }
+
+  ctx.putImageData(image,0,0);
+
+  hue += speed;
+  if(hue>360) hue=0;
+  offset += 0.05;
+}
+
+// Экспорт видео через MediaRecorder
+exportBtn.addEventListener("click", ()=>{
+  if(canvas.captureStream === undefined){
+    alert("Ваш браузер не поддерживает экспорт видео. Используйте Chrome или Edge.");
+    return;
+  }
+
+  const stream = canvas.captureStream(30);
+  const recorder = new MediaRecorder(stream, {mimeType:'video/webm; codecs=vp9'});
+  const chunks = [];
+
+  recorder.ondataavailable = e=>chunks.push(e.data);
+  recorder.onstop = ()=>{
+    const blob = new Blob(chunks,{type:'video/webm'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'strobeck_vibe.webm';
+    a.click();
+  };
+
+  recorder.start();
+  const duration = Math.min(video.duration*1000 || 300000, 300000); // до 5 минут
+  setTimeout(()=>recorder.stop(), duration);
+});
+
+// Подстройка размера canvas при ресайзе
+window.addEventListener("resize", ()=>{
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
+});
+</script>
+
+</body>
+</html>
